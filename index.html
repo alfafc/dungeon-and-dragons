@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dungeons & Dragons - Aventura Familiar</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- PANTALLA DE INICIO -->
+    <div id="screen-home" class="screen active">
+      <div class="title-banner">
+        <h1>Dungeons & Dragons</h1>
+        <p class="subtitle">Aventura Familiar</p>
+      </div>
+      <div class="home-menu">
+        <button onclick="showScreen('screen-config')" class="btn btn-primary btn-large">Nueva Aventura</button>
+        <button onclick="showScreen('screen-dice-free')" class="btn btn-secondary btn-large">Tirar Dados</button>
+        <button onclick="showScreen('screen-rules')" class="btn btn-secondary btn-large">Reglas</button>
+      </div>
+    </div>
+
+    <!-- PANTALLA DE CONFIGURACION -->
+    <div id="screen-config" class="screen">
+      <h2>Configurar Aventura</h2>
+      <div class="config-form">
+        <!-- Modo DM -->
+        <div class="config-section">
+          <label class="config-label">Dungeon Master:</label>
+          <div class="config-options">
+            <div class="option-card selected" onclick="setConfig('dmMode', 'ai')" id="cfg-dm-ai">
+              <div class="icon">🤖</div>
+              <div class="name">IA (GPT)</div>
+              <div class="desc">La IA genera la historia, encuentros y narra la aventura dinamicamente</div>
+            </div>
+            <div class="option-card" onclick="setConfig('dmMode', 'human')" id="cfg-dm-human">
+              <div class="icon">🧙</div>
+              <div class="name">Humano</div>
+              <div class="desc">Un jugador es el DM: narra, decide encuentros y controla la historia</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Duracion -->
+        <div class="config-section">
+          <label class="config-label">Duracion:</label>
+          <div class="config-options">
+            <div class="option-card" onclick="setConfig('duration', 'short')" id="cfg-dur-short">
+              <div class="icon">⚡</div>
+              <div class="name">Corta</div>
+              <div class="desc">~20 min, 5-7 salas</div>
+            </div>
+            <div class="option-card selected" onclick="setConfig('duration', 'medium')" id="cfg-dur-medium">
+              <div class="icon">⏱️</div>
+              <div class="name">Media</div>
+              <div class="desc">~45 min, 10-15 salas</div>
+            </div>
+            <div class="option-card" onclick="setConfig('duration', 'long')" id="cfg-dur-long">
+              <div class="icon">🕰️</div>
+              <div class="name">Larga</div>
+              <div class="desc">~90 min, 20-30 salas</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Dificultad -->
+        <div class="config-section">
+          <label class="config-label">Dificultad:</label>
+          <div class="config-options">
+            <div class="option-card" onclick="setConfig('difficulty', 'easy')" id="cfg-diff-easy">
+              <div class="icon">😊</div>
+              <div class="name">Facil</div>
+              <div class="desc">Enemigos debiles, mucha curacion, ideal para principiantes</div>
+            </div>
+            <div class="option-card selected" onclick="setConfig('difficulty', 'normal')" id="cfg-diff-normal">
+              <div class="icon">⚔️</div>
+              <div class="name">Normal</div>
+              <div class="desc">Balance clasico de D&D, desafio justo</div>
+            </div>
+            <div class="option-card" onclick="setConfig('difficulty', 'hard')" id="cfg-diff-hard">
+              <div class="icon">💀</div>
+              <div class="name">Dificil</div>
+              <div class="desc">Enemigos fuertes, poca curacion, para veteranos</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tono -->
+        <div class="config-section">
+          <label class="config-label">Tono de la aventura:</label>
+          <div class="config-options">
+            <div class="option-card selected" onclick="setConfig('tone', 'kids')" id="cfg-tone-kids">
+              <div class="icon">🌟</div>
+              <div class="name">Para Niños</div>
+              <div class="desc">Aventura alegre, humor, sin violencia grafica</div>
+            </div>
+            <div class="option-card" onclick="setConfig('tone', 'teens')" id="cfg-tone-teens">
+              <div class="icon">🗡️</div>
+              <div class="name">Juvenil</div>
+              <div class="desc">Mas tension y drama, estilo pelicula de aventuras</div>
+            </div>
+            <div class="option-card" onclick="setConfig('tone', 'adult')" id="cfg-tone-adult">
+              <div class="icon">🩸</div>
+              <div class="name">Adulto</div>
+              <div class="desc">Oscuro y realista, decisiones morales complejas</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Ambientacion -->
+        <div class="config-section">
+          <label class="config-label">Ambientacion:</label>
+          <div class="config-options">
+            <div class="option-card selected" onclick="setConfig('setting', 'dungeon')" id="cfg-set-dungeon">
+              <div class="icon">🏰</div>
+              <div class="name">Mazmorra Clasica</div>
+              <div class="desc">Cuevas, trampas, monstruos y tesoros</div>
+            </div>
+            <div class="option-card" onclick="setConfig('setting', 'forest')" id="cfg-set-forest">
+              <div class="icon">🌲</div>
+              <div class="name">Bosque Encantado</div>
+              <div class="desc">Hadas, criaturas del bosque, magia natural</div>
+            </div>
+            <div class="option-card" onclick="setConfig('setting', 'castle')" id="cfg-set-castle">
+              <div class="icon">👑</div>
+              <div class="name">Castillo Maldito</div>
+              <div class="desc">No-muertos, fantasmas, misterios goticos</div>
+            </div>
+            <div class="option-card" onclick="setConfig('setting', 'pirate')" id="cfg-set-pirate">
+              <div class="icon">🏴‍☠️</div>
+              <div class="name">Isla Pirata</div>
+              <div class="desc">Piratas, naufragios, tesoros enterrados</div>
+            </div>
+            <div class="option-card" onclick="setConfig('setting', 'volcano')" id="cfg-set-volcano">
+              <div class="icon">🌋</div>
+              <div class="name">Templo del Volcan</div>
+              <div class="desc">Lava, dragones, cultistas de fuego</div>
+            </div>
+            <div class="option-card" onclick="setConfig('setting', 'random')" id="cfg-set-random">
+              <div class="icon">🎲</div>
+              <div class="name">Sorpresa</div>
+              <div class="desc">La IA decide la ambientacion!</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- API Key -->
+        <div class="config-section" id="api-key-section">
+          <label class="config-label">OpenAI API Key:</label>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <input type="password" id="api-key-input" placeholder="sk-..." style="flex:1; padding:10px; border:2px solid var(--border); border-radius:8px; background:var(--bg-dark); color:var(--text); font-size:0.95em;">
+            <button class="btn btn-small" onclick="toggleKeyVisibility()" id="toggle-key-btn">👁️</button>
+          </div>
+          <p style="font-size:0.75em; color:var(--text-dim); margin-top:6px;">Se guarda en tu navegador (localStorage). Nunca se envia a ningun servidor excepto OpenAI.</p>
+        </div>
+
+        <div class="config-actions">
+          <button onclick="goToPlayersScreen()" class="btn btn-primary btn-large">Siguiente: Jugadores</button>
+          <button onclick="showScreen('screen-home')" class="btn btn-secondary">Volver</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- PANTALLA DE JUGADORES -->
+    <div id="screen-players" class="screen">
+      <h2>Jugadores</h2>
+      <div class="setup-form">
+        <div id="dm-name-section" class="config-section" style="display:none;">
+          <label class="config-label">Nombre del Dungeon Master:</label>
+          <div class="player-name-input">
+            <input type="text" id="dm-human-name" placeholder="Nombre del DM">
+          </div>
+        </div>
+        <label>Cantidad de jugadores:</label>
+        <div class="player-count-selector">
+          <button onclick="setPlayerCount(1)" class="btn btn-small" id="pc-1">1</button>
+          <button onclick="setPlayerCount(2)" class="btn btn-small active" id="pc-2">2</button>
+          <button onclick="setPlayerCount(3)" class="btn btn-small" id="pc-3">3</button>
+          <button onclick="setPlayerCount(4)" class="btn btn-small" id="pc-4">4</button>
+        </div>
+        <div id="player-names-container"></div>
+        <button onclick="startCharacterCreation()" class="btn btn-primary btn-large">Crear Personajes</button>
+        <button onclick="showScreen('screen-config')" class="btn btn-secondary">Volver</button>
+      </div>
+    </div>
+
+    <!-- PANTALLA DE CREACION DE PERSONAJE -->
+    <div id="screen-character" class="screen">
+      <h2>Crear Personaje - <span id="char-player-name">Jugador 1</span></h2>
+      <div class="character-form">
+        <div class="form-row">
+          <label>Nombre del personaje:</label>
+          <input type="text" id="char-name" placeholder="Ej: Thorin, Elara, Gandor...">
+        </div>
+        <div class="form-row">
+          <label>Raza:</label>
+          <div class="option-grid" id="race-options"></div>
+        </div>
+        <div class="form-row">
+          <label>Clase:</label>
+          <div class="option-grid" id="class-options"></div>
+        </div>
+        <div class="form-row">
+          <label>Estadisticas (4d6, descarta el menor):</label>
+          <div id="stats-container" class="stats-grid"></div>
+          <button onclick="rollAllStats()" class="btn btn-secondary">Tirar Estadisticas</button>
+        </div>
+        <div class="form-actions">
+          <button onclick="confirmCharacter()" class="btn btn-primary btn-large" id="btn-confirm-char">Confirmar Personaje</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- PANTALLA DE AVENTURA -->
+    <div id="screen-adventure" class="screen">
+      <div class="adventure-layout">
+        <div class="narrative-panel">
+          <div id="narrative-log" class="narrative-log"></div>
+        </div>
+        <div class="action-panel">
+          <div id="party-status" class="party-status"></div>
+          <div id="adventure-actions" class="adventure-actions"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PANTALLA DE COMBATE -->
+    <div id="screen-combat" class="screen">
+      <div class="combat-layout">
+        <div class="combat-log-panel">
+          <h3>Combate</h3>
+          <div id="combat-log" class="combat-log"></div>
+        </div>
+        <div class="combat-sidebar">
+          <div id="turn-order" class="turn-order"></div>
+          <div id="combat-actions" class="combat-actions"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PANTALLA DE DADOS LIBRE -->
+    <div id="screen-dice-free" class="screen">
+      <h2>Tirar Dados</h2>
+      <div class="dice-free-container">
+        <div class="dice-buttons">
+          <button onclick="rollFreeDice(4)" class="btn dice-btn">d4</button>
+          <button onclick="rollFreeDice(6)" class="btn dice-btn">d6</button>
+          <button onclick="rollFreeDice(8)" class="btn dice-btn">d8</button>
+          <button onclick="rollFreeDice(10)" class="btn dice-btn">d10</button>
+          <button onclick="rollFreeDice(12)" class="btn dice-btn">d12</button>
+          <button onclick="rollFreeDice(20)" class="btn dice-btn d20-btn">d20</button>
+          <button onclick="rollFreeDice(100)" class="btn dice-btn">d100</button>
+        </div>
+        <div class="dice-count-selector">
+          <label>Cantidad:</label>
+          <button onclick="setDiceCount(1)" class="btn btn-small active" id="dc-1">1</button>
+          <button onclick="setDiceCount(2)" class="btn btn-small" id="dc-2">2</button>
+          <button onclick="setDiceCount(3)" class="btn btn-small" id="dc-3">3</button>
+          <button onclick="setDiceCount(4)" class="btn btn-small" id="dc-4">4</button>
+          <button onclick="setDiceCount(5)" class="btn btn-small" id="dc-5">5</button>
+          <button onclick="setDiceCount(6)" class="btn btn-small" id="dc-6">6</button>
+        </div>
+        <div id="dice-result" class="dice-result"></div>
+        <div id="dice-history" class="dice-history"></div>
+        <button onclick="showScreen('screen-home')" class="btn btn-secondary">Volver</button>
+      </div>
+    </div>
+
+    <!-- PANTALLA DE REGLAS -->
+    <div id="screen-rules" class="screen">
+      <h2>Reglas Basicas</h2>
+      <div class="rules-content">
+        <div class="rule-section">
+          <h3>Los Dados</h3>
+          <p><strong>d20</strong> - El dado principal. Se usa para ataques, salvaciones y pruebas de habilidad.</p>
+          <p><strong>d4, d6, d8, d10, d12</strong> - Dados de dano. Cada arma usa un dado diferente.</p>
+          <p><strong>d100</strong> - Para eventos aleatorios y tablas especiales.</p>
+        </div>
+        <div class="rule-section">
+          <h3>Combate</h3>
+          <p><strong>Iniciativa:</strong> Cada combatiente tira 1d20 + modificador de Destreza. El mayor va primero.</p>
+          <p><strong>Atacar:</strong> Tira 1d20 + modificador de ataque. Si iguala o supera la Clase de Armadura (CA) del enemigo, le pegas.</p>
+          <p><strong>Dano:</strong> Tira el dado de dano de tu arma + modificador de Fuerza (o Destreza para armas a distancia).</p>
+          <p><strong>Critico:</strong> Si sacas 20 natural en el d20, es critico: tiras el doble de dados de dano.</p>
+          <p><strong>Pifia:</strong> Si sacas 1 natural, fallas automaticamente.</p>
+        </div>
+        <div class="rule-section">
+          <h3>Estadisticas</h3>
+          <p><strong>FUE</strong> (Fuerza) - Dano cuerpo a cuerpo, cargar cosas.</p>
+          <p><strong>DES</strong> (Destreza) - Esquivar, sigilo, ataques a distancia.</p>
+          <p><strong>CON</strong> (Constitucion) - Puntos de vida, resistencia.</p>
+          <p><strong>INT</strong> (Inteligencia) - Magia arcana, conocimiento.</p>
+          <p><strong>SAB</strong> (Sabiduria) - Percepcion, magia divina.</p>
+          <p><strong>CAR</strong> (Carisma) - Persuasion, intimidacion, liderazgo.</p>
+        </div>
+        <div class="rule-section">
+          <h3>Modificadores</h3>
+          <p>Cada estadistica tiene un modificador: (valor - 10) / 2, redondeado hacia abajo.</p>
+          <p>Ej: Fuerza 16 = modificador +3, Fuerza 8 = modificador -1</p>
+        </div>
+      </div>
+      <button onclick="showScreen('screen-home')" class="btn btn-secondary">Volver</button>
+    </div>
+
+    <!-- PANTALLA DE VICTORIA / DERROTA -->
+    <div id="screen-end" class="screen">
+      <div id="end-content" class="end-content"></div>
+      <div style="text-align:center; margin-top:15px; display:flex; gap:12px; justify-content:center; flex-wrap:wrap;">
+        <button onclick="downloadAdventureHTML()" class="btn btn-secondary btn-large">📜 Descargar Cronica</button>
+        <button onclick="location.reload()" class="btn btn-primary btn-large">Jugar de Nuevo</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
