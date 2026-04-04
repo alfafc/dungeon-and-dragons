@@ -84,6 +84,47 @@ function setConfig(key, value) {
     const el = document.getElementById(`${prefix}${value}`);
     if (el) el.classList.add('selected');
   }
+  saveToLocalStorage();
+}
+
+// --- LOCAL STORAGE PERSISTENCE ---
+
+function saveToLocalStorage() {
+  localStorage.setItem('dnd_gameConfig', JSON.stringify(gameConfig));
+  localStorage.setItem('dnd_playerCount', gameState.playerCount);
+  localStorage.setItem('dnd_playerNames', JSON.stringify(gameState.playerNames));
+  localStorage.setItem('dnd_characters', JSON.stringify(gameState.characters));
+  localStorage.setItem('dnd_dmName', gameState.dmName);
+}
+
+function loadFromLocalStorage() {
+  const savedConfig = localStorage.getItem('dnd_gameConfig');
+  if (savedConfig) {
+    const parsed = JSON.parse(savedConfig);
+    Object.assign(gameConfig, parsed);
+    // Restore UI selections
+    Object.entries(gameConfig).forEach(([key, value]) => setConfig(key, value));
+  }
+
+  const savedCount = localStorage.getItem('dnd_playerCount');
+  if (savedCount) {
+    gameState.playerCount = parseInt(savedCount, 10);
+  }
+
+  const savedNames = localStorage.getItem('dnd_playerNames');
+  if (savedNames) {
+    gameState.playerNames = JSON.parse(savedNames);
+  }
+
+  const savedChars = localStorage.getItem('dnd_characters');
+  if (savedChars) {
+    gameState.characters = JSON.parse(savedChars);
+  }
+
+  const savedDmName = localStorage.getItem('dnd_dmName');
+  if (savedDmName) {
+    gameState.dmName = savedDmName;
+  }
 }
 
 function goToPlayersScreen() {
@@ -489,6 +530,7 @@ function setPlayerCount(count) {
   document.querySelectorAll('.player-count-selector .btn').forEach(b => b.classList.remove('active'));
   document.getElementById(`pc-${count}`).classList.add('active');
   renderPlayerNames();
+  saveToLocalStorage();
 }
 
 function renderPlayerNames() {
@@ -517,6 +559,7 @@ function startCharacterCreation() {
   }
   gameState.characters = [];
   gameState.currentCharacterIndex = 0;
+  saveToLocalStorage();
   showCharacterScreen();
 }
 
@@ -630,6 +673,7 @@ function confirmCharacter() {
 
   gameState.characters.push(character);
   gameState.currentCharacterIndex++;
+  saveToLocalStorage();
 
   if (gameState.currentCharacterIndex < gameState.playerCount) {
     showCharacterScreen();
@@ -2042,5 +2086,10 @@ function rollFreeDice(sides) {
 
 // --- INIT ---
 
+loadFromLocalStorage();
 renderPlayerNames();
+// Restore player count button
+document.querySelectorAll('.player-count-selector .btn').forEach(b => b.classList.remove('active'));
+const pcBtn = document.getElementById(`pc-${gameState.playerCount}`);
+if (pcBtn) pcBtn.classList.add('active');
 initApiKeyInput();
