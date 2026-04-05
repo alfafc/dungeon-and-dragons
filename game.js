@@ -771,9 +771,18 @@ async function startAdventure() {
 
   if (gameConfig.dmMode === 'ai') {
     const settingName = SETTING_NAMES[gameConfig.setting] || 'Mazmorra';
-    const prompt = `${getGameStateForAI()}
+    const scenarioInput = document.getElementById('custom-scenario');
+    const customScenario = scenarioInput && scenarioInput.value.trim();
+    let prompt;
+    if (customScenario) {
+      prompt = `${getGameStateForAI()}
 
-Comienza una nueva aventura para este grupo de heroes. La ambientacion es: ${settingName}. Describe el inicio de la aventura. Esta es la sala 1. Genera la primera escena con 3 opciones para los jugadores.`;
+Comienza una nueva aventura para este grupo de héroes. La ambientación es: ${settingName}. El punto de partida es el siguiente escenario planteado por los jugadores: "${customScenario}". Usá esto como base para la primera escena, respetando la ambientación elegida. Esta es la sala 1. Generá la primera escena con 3 opciones.`;
+    } else {
+      prompt = `${getGameStateForAI()}
+
+Comienza una nueva aventura para este grupo de héroes. La ambientación es: ${settingName}. Describí el inicio de la aventura. Esta es la sala 1. Generá la primera escena con 3 opciones para los jugadores.`;
+    }
 
     const response = await callAI(prompt);
     if (response) {
@@ -1072,6 +1081,19 @@ function usePotion() {
   updatePartyStatus();
 }
 
+const PLAYER_COLORS = [
+  { bg: 'rgba(41, 128, 185, 0.15)', border: '#3498db' },   // azul
+  { bg: 'rgba(39, 174, 96, 0.15)', border: '#2ecc71' },    // verde
+  { bg: 'rgba(230, 168, 23, 0.15)', border: '#e6a817' },   // dorado
+  { bg: 'rgba(142, 68, 173, 0.15)', border: '#8e44ad' },   // violeta
+];
+
+function getPlayerColor(combatant) {
+  if (combatant.isEnemy) return null;
+  const idx = gameState.characters.findIndex(c => c.name === combatant.name);
+  return PLAYER_COLORS[idx % PLAYER_COLORS.length] || PLAYER_COLORS[0];
+}
+
 function disableAllIn(container) {
   if (!container) return;
   container.querySelectorAll('button, .btn').forEach(b => b.disabled = true);
@@ -1228,6 +1250,7 @@ function interactiveRoll(sides, label) {
             <span class="dice-result-number">${result}</span>${extra}
           </div>
         `;
+        wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
         resolve(result);
       }, 600);
     };
@@ -1574,11 +1597,18 @@ function startCombat(enemyIds) {
   processTurn();
 }
 
-function addCombatLog(type, text) {
+function addCombatLog(type, text, combatant) {
   const log = document.getElementById('narrative-log');
   const target = gameState.currentRoomBlock || log;
   const entry = document.createElement('div');
   entry.className = `combat-log-entry ${type}`;
+  if (combatant) {
+    const pColor = getPlayerColor(combatant);
+    if (pColor) {
+      entry.style.background = pColor.bg;
+      entry.style.borderLeftColor = pColor.border;
+    }
+  }
   entry.innerHTML = text;
   target.appendChild(entry);
   scrollToLatest();
@@ -1605,6 +1635,11 @@ function updateTurnOrder() {
 
     const entry = document.createElement('div');
     entry.className = `turn-entry ${isEnemyClass} ${activeClass} ${deadClass}`;
+    const pColor = getPlayerColor(c);
+    if (pColor && !isDead) {
+      entry.style.background = pColor.bg;
+      entry.style.borderLeft = `3px solid ${pColor.border}`;
+    }
     entry.innerHTML = `
       <span class="turn-init">${c.initiative}</span>
       <span>${c.isEnemy ? c.icon : c.race.icon} ${c.name}</span>
@@ -1671,7 +1706,12 @@ function getSpellDamageInfo(spell, player) {
 
 function showPlayerCombatActions(player) {
   const container = document.getElementById('combat-actions');
+  const pColor = getPlayerColor(player);
   container.innerHTML = `<h4>Turno de ${player.name}</h4>`;
+  if (pColor) {
+    container.style.background = pColor.bg;
+    container.style.borderColor = pColor.border;
+  }
 
   const attackBtn = document.createElement('button');
   attackBtn.className = 'btn';
@@ -1768,14 +1808,14 @@ async function playerAttack(attacker, target) {
 
   if (d20 === 1) {
     logText += ' - PIFIA!';
-    addCombatLog('miss', logText);
+    addCombatLog('miss', logText, attacker);
   } else if (d20 === 20) {
     const dmgDice = rollMultiple(2, attacker.class.weaponDie);
     const dmg = dmgDice.reduce((a, b) => a + b, 0) + atkMod + (attacker.ref ? attacker.ref.weaponBonus : 0);
     const finalDmg = Math.max(1, dmg);
     target.hp = Math.max(0, target.hp - finalDmg);
     logText += ` - 💥 CRITICO! Dano: ${finalDmg} (${dmgDice.join('+')} ${modStr(atkMod)})`;
-    addCombatLog('critical', logText);
+    addCombatLog('critical', logText, attacker);
     shakeCombatLog();
   } else if (total >= target.ac) {
     const dmgRoll = roll(attacker.class.weaponDie);
@@ -1783,14 +1823,14 @@ async function playerAttack(attacker, target) {
     const finalDmg = Math.max(1, dmg);
     target.hp = Math.max(0, target.hp - finalDmg);
     logText += ` - Impacto! Dano: ${finalDmg}`;
-    addCombatLog('hit', logText);
+    addCombatLog('hit', logText, attacker);
   } else {
     logText += ' - Falla!';
-    addCombatLog('miss', logText);
+    addCombatLog('miss', logText, attacker);
   }
 
   if (target.hp <= 0) {
-    addCombatLog('hit', `💀 ${target.icon} ${target.name} ha sido derrotado!`);
+    addCombatLog('hit', `💀 ${target.icon} ${target.name} ha sido derrotado!`, attacker);
   }
 
   updateTurnOrder();
@@ -1824,7 +1864,7 @@ async function castOffensiveSpell(caster, target, spell) {
       }
       if (enemy.hp <= 0) desc += ` 💀 Derrotado!`;
     });
-    addCombatLog('critical', desc);
+    addCombatLog('critical', desc, caster);
   } else if (spell === 'Rayo de Escarcha') {
     const d20 = await interactiveRoll(20, `${caster.race.icon} ${caster.name} lanza Rayo de Escarcha a ${target.icon} ${target.name}!`);
     const total = d20 + intMod;
@@ -1834,10 +1874,10 @@ async function castOffensiveSpell(caster, target, spell) {
       target.hp = Math.max(0, target.hp - dmg);
       desc += ` - Impacto! ${dmg} dano de frio!`;
       if (target.hp <= 0) desc += ` 💀 Derrotado!`;
-      addCombatLog('hit', desc);
+      addCombatLog('hit', desc, caster);
     } else {
       desc += ` - Falla!`;
-      addCombatLog('miss', desc);
+      addCombatLog('miss', desc, caster);
     }
   } else if (spell === 'Palabra Sagrada') {
     await interactiveRoll(8, `✨ ${caster.name} pronuncia una Palabra Sagrada! Tira dano!`);
@@ -1845,14 +1885,14 @@ async function castOffensiveSpell(caster, target, spell) {
     target.hp = Math.max(0, target.hp - dmg);
     desc = `✨ ${caster.name} pronuncia una Palabra Sagrada contra ${target.name}! ${dmg} dano radiante!`;
     if (target.hp <= 0) desc += ` 💀 Derrotado!`;
-    addCombatLog('hit', desc);
+    addCombatLog('hit', desc, caster);
   } else if (spell === 'Marca del Cazador') {
     await interactiveRoll(6, `🎯 ${caster.name} marca a ${target.icon} ${target.name}! Tira dano!`);
     dmg = roll(6) + roll(caster.class.weaponDie) + intMod;
     target.hp = Math.max(0, target.hp - dmg);
     desc = `🎯 ${caster.name} marca a ${target.name} y dispara! ${dmg} dano!`;
     if (target.hp <= 0) desc += ` 💀 Derrotado!`;
-    addCombatLog('hit', desc);
+    addCombatLog('hit', desc, caster);
   }
 
   updateTurnOrder();
@@ -1867,7 +1907,7 @@ function castHealSpell(caster, target, spell) {
   actualTarget.hp = Math.min(actualTarget.maxHp, actualTarget.hp + healAmount);
   target.hp = actualTarget.hp;
 
-  addCombatLog('heal', `💚 ${caster.name} cura a ${target.name} por ${healAmount} HP! (${actualTarget.hp}/${actualTarget.maxHp})`);
+  addCombatLog('heal', `💚 ${caster.name} cura a ${target.name} por ${healAmount} HP! (${actualTarget.hp}/${actualTarget.maxHp})`, caster);
   updateTurnOrder();
   nextTurn();
 }
@@ -1880,7 +1920,7 @@ function castBlessingSpell(caster) {
     if (p.ref) p.ref.ac += 1;
     p.ac += 1;
   });
-  addCombatLog('heal', `🙏 ${caster.name} bendice al grupo! +1 CA para todos!`);
+  addCombatLog('heal', `🙏 ${caster.name} bendice al grupo! +1 CA para todos!`, caster);
   updateTurnOrder();
   nextTurn();
 }
@@ -1889,7 +1929,7 @@ function castShieldSpell(caster) {
   if (caster.ref) caster.ref.spellSlots--;
   if (caster.ref) caster.ref.ac += 3;
   caster.ac += 3;
-  addCombatLog('heal', `🛡️ ${caster.name} conjura Escudo Magico! +3 CA hasta el final del combate!`);
+  addCombatLog('heal', `🛡️ ${caster.name} conjura Escudo Magico! +3 CA hasta el final del combate!`, caster);
   updateTurnOrder();
   nextTurn();
 }
@@ -1905,7 +1945,7 @@ function useCombatPotion(player) {
   target.hp = Math.min(target.maxHp, target.hp + heal);
   player.hp = target.hp;
 
-  addCombatLog('heal', `🧪 ${player.name} bebe una pocion y recupera ${heal} HP! (${target.hp}/${target.maxHp})`);
+  addCombatLog('heal', `🧪 ${player.name} bebe una pocion y recupera ${heal} HP! (${target.hp}/${target.maxHp})`, player);
   updateTurnOrder();
   nextTurn();
 }

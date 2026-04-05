@@ -181,6 +181,11 @@
         </div>
         <div id="player-names-container"></div>
         <div id="saved-characters-section" style="display:none;"></div>
+        <div class="config-section" id="scenario-section">
+          <label class="config-label">Escenario inicial (opcional):</label>
+          <textarea id="custom-scenario" placeholder="Ej: Los héroes despiertan encadenados en una celda oscura sin recordar cómo llegaron..." style="width:100%; min-height:60px; padding:10px; border:2px solid var(--border); border-radius:8px; background:var(--bg-dark); color:var(--text); font-family:inherit; font-size:0.95em; resize:vertical;"></textarea>
+          <p style="font-size:0.75em; color:var(--text-dim); margin-top:4px;">Describí una situación de partida para que la IA arranque desde ahí.</p>
+        </div>
         <button onclick="startCharacterCreation()" class="btn btn-primary btn-large">Crear Personajes Nuevos</button>
         <button onclick="showScreen('screen-config')" class="btn btn-secondary">Volver</button>
       </div>
