@@ -144,6 +144,7 @@ function goToPlayersScreen() {
     dmSection.style.display = gameConfig.dmMode === 'human' ? 'block' : 'none';
   }
   showScreen('screen-players');
+  showSavedCharactersOption();
 }
 
 function toggleKeyVisibility() {
@@ -179,6 +180,10 @@ let gameState = {
   storyLog: [],
   imageDescriptions: [],
   isGeneratingImage: false,
+  currentRoomBlock: null,
+  ttsEnabled: true,
+  ttsVoice: null,
+  currentPlayerTurn: 0,
 };
 
 // --- AI DUNGEON MASTER ---
@@ -355,8 +360,10 @@ function showThinkingIndicator() {
     indicator.id = 'thinking-indicator';
     indicator.className = 'narrative-entry dm';
     indicator.innerHTML = '<div class="speaker">Dungeon Master</div><div class="thinking-dots">Pensando<span>.</span><span>.</span><span>.</span></div>';
-    log.appendChild(indicator);
-    log.scrollTop = log.scrollHeight;
+    const target = gameState.currentRoomBlock || log;
+    target.appendChild(indicator);
+    const panel = document.querySelector('.narrative-panel');
+    if (panel) panel.scrollTop = 0;
   }
 }
 
@@ -438,26 +445,25 @@ async function generateSceneImage(narrativeText, extraContext) {
 function addImagePlaceholder(containerId) {
   const container = document.getElementById(containerId);
   if (!container) return;
+  const target = (containerId === 'narrative-log' && gameState.currentRoomBlock) ? gameState.currentRoomBlock : container;
   const placeholder = document.createElement('div');
   placeholder.className = 'scene-image-container loading';
   placeholder.id = `img-placeholder-${Date.now()}`;
   placeholder.innerHTML = '<div class="image-loading"><div class="image-loading-spinner"></div><span>Generando imagen...</span></div>';
-  container.appendChild(placeholder);
-  container.scrollTop = container.scrollHeight;
+  target.appendChild(placeholder);
+  scrollToLatest();
   return placeholder.id;
 }
 
 function resolveImagePlaceholder(placeholderId, base64) {
   const placeholder = document.getElementById(placeholderId);
   if (!placeholder) return;
-  const log = placeholder.closest('.narrative-log, .combat-log');
   if (base64) {
     placeholder.classList.remove('loading');
     placeholder.innerHTML = `<img src="data:image/png;base64,${base64}" alt="Escena de la aventura" class="scene-image">`;
   } else {
     placeholder.remove();
   }
-  if (log) log.scrollTop = log.scrollHeight;
 }
 
 // --- STORY LOG ---
@@ -547,7 +553,7 @@ function renderPlayerNames() {
   }
 }
 
-function startCharacterCreation() {
+function collectPlayerNames() {
   gameState.playerNames = [];
   for (let i = 0; i < gameState.playerCount; i++) {
     const input = document.getElementById(`player-name-${i}`);
@@ -557,10 +563,48 @@ function startCharacterCreation() {
     const dmInput = document.getElementById('dm-human-name');
     gameState.dmName = (dmInput && dmInput.value.trim()) || 'Dungeon Master';
   }
+}
+
+function startCharacterCreation() {
+  collectPlayerNames();
   gameState.characters = [];
   gameState.currentCharacterIndex = 0;
   saveToLocalStorage();
   showCharacterScreen();
+}
+
+function useSavedCharacters() {
+  collectPlayerNames();
+  // Reset HP and spell slots for new adventure
+  gameState.characters.forEach(c => {
+    c.hp = c.maxHp;
+    c.spellSlots = c.maxSpellSlots;
+    c.weaponBonus = 0;
+  });
+  saveToLocalStorage();
+  startAdventure();
+}
+
+function showSavedCharactersOption() {
+  const section = document.getElementById('saved-characters-section');
+  if (!section) return;
+  const saved = gameState.characters;
+  if (!saved || saved.length === 0) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = 'block';
+  section.innerHTML = `
+    <div class="saved-party-preview">
+      <h4 style="color: var(--gold); margin-bottom: 8px;">Grupo guardado:</h4>
+      ${saved.map(c => `
+        <div class="saved-char-row">
+          ${c.race.icon} <strong>${c.name}</strong> — ${c.race.name} ${c.class.name} (HP: ${c.maxHp}, CA: ${c.ac})
+        </div>
+      `).join('')}
+      <button onclick="useSavedCharacters()" class="btn btn-primary btn-large" style="margin-top: 10px; width:100%;">Jugar con este grupo</button>
+    </div>
+  `;
 }
 
 // --- CHARACTER CREATION ---
@@ -703,8 +747,18 @@ async function startAdventure() {
   gameState.storyLog = [];
   gameState.imageDescriptions = [];
   gameState.adventureStarted = true;
+  gameState.currentPlayerTurn = 0;
   showScreen('screen-adventure');
   document.getElementById('narrative-log').innerHTML = '';
+  const navList = document.getElementById('room-nav-list');
+  if (navList) navList.innerHTML = '';
+  gameState.currentRoomBlock = null;
+
+  // Hide sidebar in AI mode (everything is inline in narrative)
+  const layout = document.querySelector('.adventure-layout');
+  if (layout) {
+    layout.classList.toggle('no-sidebar', gameConfig.dmMode === 'ai');
+  }
 
   if (gameConfig.dmMode === 'ai') {
     const settingName = SETTING_NAMES[gameConfig.setting] || 'Mazmorra';
@@ -726,6 +780,7 @@ Comienza una nueva aventura para este grupo de heroes. La ambientacion es: ${set
 
 function processAIRoom(response) {
   gameState.roomCount++;
+  startNewRoomBlock(`Sala ${gameState.roomCount}`);
 
   // Narrativa
   if (response.narrativa) {
@@ -743,7 +798,7 @@ function processAIRoom(response) {
   // XP
   if (response.xp && response.xp > 0) {
     gameState.xp += response.xp;
-    addNarrative('success', 'Experiencia!', `El grupo gana ${response.xp} XP. (Total: ${gameState.xp} XP)`);
+    addNarrative('success', '¡Experiencia!', `El grupo gana ${response.xp} XP. (Total: ${gameState.xp} XP)`);
   }
 
   // Loot
@@ -757,7 +812,7 @@ function processAIRoom(response) {
     const target = gameState.characters[targetIdx];
     const dmg = roll(response.trampa.dano || 4) + roll(response.trampa.dano || 4);
     target.hp = Math.max(0, target.hp - dmg);
-    addNarrative('combat-msg', 'Trampa!', `${response.trampa.descripcion || 'Una trampa se activa!'} ${target.name} recibe ${dmg} puntos de dano!`);
+    addNarrative('combat-msg', '¡Trampa!', `${response.trampa.descripcion || 'Una trampa se activa!'} ${target.name} recibe ${dmg} puntos de dano!`);
   }
 
   // Curacion
@@ -766,7 +821,7 @@ function processAIRoom(response) {
     gameState.characters.forEach(c => {
       c.hp = Math.min(c.maxHp, c.hp + amount);
     });
-    addNarrative('success', 'Curacion!', `${response.curacion.descripcion || 'El grupo se cura.'} Todos recuperan ${amount} HP!`);
+    addNarrative('success', '¡Curación!', `${response.curacion.descripcion || 'El grupo se cura.'} Todos recuperan ${amount} HP!`);
   }
 
   // Fin de aventura
@@ -780,7 +835,7 @@ function processAIRoom(response) {
     const validEnemies = response.combate.enemigos.filter(e => MONSTERS[e]);
     if (validEnemies.length > 0) {
       if (response.combate.descripcion) {
-        addNarrative('combat-msg', 'Combate!', response.combate.descripcion);
+        addNarrative('combat-msg', '¡Combate!', response.combate.descripcion);
       }
       updatePartyStatus();
       setTimeout(() => startCombat(validEnemies), 1500);
@@ -799,40 +854,60 @@ function processAIRoom(response) {
 function processAILoot(loot) {
   if (loot.oro && loot.oro > 0) {
     gameState.gold += loot.oro;
-    addNarrative('loot', 'Tesoro!', `Encuentran ${loot.oro} monedas de oro! (Total: ${gameState.gold})`);
+    addNarrative('loot', '¡Tesoro!', `Encuentran ${loot.oro} monedas de oro! (Total: ${gameState.gold})`);
   }
   if (loot.objetos) {
     loot.objetos.forEach(item => {
       if (item.tipo === 'pocion') {
         const potion = { name: item.nombre, type: 'potion', healing: item.curacion || 8 };
         gameState.inventory.push(potion);
-        addNarrative('loot', 'Objeto!', `Encuentran: ${item.nombre} (cura ${potion.healing} HP).`);
+        addNarrative('loot', '¡Objeto!', `Encuentran: ${item.nombre} (cura ${potion.healing} HP).`);
       } else if (item.tipo === 'arma') {
         const bonus = item.bonus || 1;
         gameState.characters.forEach(c => {
           if (c.weaponBonus < bonus) c.weaponBonus = bonus;
         });
-        addNarrative('loot', 'Arma!', `Encuentran: ${item.nombre}! (+${bonus} al dano).`);
+        addNarrative('loot', '¡Arma!', `Encuentran: ${item.nombre}! (+${bonus} al dano).`);
       } else if (item.tipo === 'artefacto') {
         gameState.inventory.push({ name: item.nombre, type: 'artifact' });
-        addNarrative('loot', 'Objeto legendario!', `Encuentran: ${item.nombre}!`);
+        addNarrative('loot', '¡Objeto legendario!', `Encuentran: ${item.nombre}!`);
       }
     });
   }
 }
 
+function getCurrentPlayerName() {
+  const chars = gameState.characters;
+  if (!chars || chars.length === 0) return 'Aventureros';
+  const idx = gameState.currentPlayerTurn % chars.length;
+  return chars[idx].name;
+}
+
+function advancePlayerTurn() {
+  gameState.currentPlayerTurn = (gameState.currentPlayerTurn + 1) % gameState.characters.length;
+}
+
 function renderAIActions(opciones) {
-  const container = document.getElementById('adventure-actions');
-  container.innerHTML = '<h4 style="color: var(--gold); margin-bottom: 8px;">Que hacen?</h4>';
+  const typeIcons = { explorar: '🚶', combate: '⚔️', sigilo: '🤫', social: '🗣️', investigar: '🔍', magia: '✨' };
+  const target = gameState.currentRoomBlock || document.getElementById('narrative-log');
+
+  const playerName = getCurrentPlayerName();
+  const prompt = gameState.characters.length > 1
+    ? `${playerName}, ¿qué hacen?`
+    : `${playerName}, ¿qué hacés?`;
+
+  // Render interactive choices inline in narrative panel
+  const wrapper = document.createElement('div');
+  wrapper.className = 'inline-actions';
+  wrapper.innerHTML = `<h4 style="color: var(--gold); margin-bottom: 8px;">${prompt}</h4>`;
 
   opciones.forEach((opcion, i) => {
     const btn = document.createElement('button');
     btn.className = 'btn';
-    const typeIcons = { explorar: '🚶', combate: '⚔️', sigilo: '🤫', social: '🗣️', investigar: '🔍', magia: '✨' };
     const icon = typeIcons[opcion.tipo] || '▶️';
-    btn.textContent = `${icon} ${opcion.texto}`;
+    btn.textContent = `${i + 1}. ${icon} ${opcion.texto}`;
     btn.onclick = () => makeAIChoice(opcion);
-    container.appendChild(btn);
+    wrapper.appendChild(btn);
   });
 
   // Potion button
@@ -842,9 +917,9 @@ function renderAIActions(opciones) {
     if (injured) {
       const btn = document.createElement('button');
       btn.className = 'btn btn-secondary';
-      btn.textContent = `🧪 Usar Pocion de Curacion (${potions.length} disponibles)`;
+      btn.textContent = `🧪 Usar Poción de Curación (${potions.length} disponibles)`;
       btn.onclick = () => usePotion();
-      container.appendChild(btn);
+      wrapper.appendChild(btn);
     }
   }
 
@@ -852,10 +927,26 @@ function renderAIActions(opciones) {
   const customDiv = document.createElement('div');
   customDiv.style.cssText = 'display:flex; gap:8px; margin-top:10px;';
   customDiv.innerHTML = `
-    <input type="text" id="custom-action" placeholder="O escribe tu propia accion..." style="flex:1; padding:10px; border:2px solid var(--border); border-radius:8px; background:var(--bg-dark); color:var(--text); font-size:0.95em;">
+    <input type="text" id="custom-action" placeholder="O escribí tu propia acción..." style="flex:1; padding:10px; border:2px solid var(--border); border-radius:8px; background:var(--bg-dark); color:var(--text); font-size:0.95em;">
     <button class="btn btn-primary" onclick="submitCustomAction()">Hacer</button>
   `;
-  container.appendChild(customDiv);
+  wrapper.appendChild(customDiv);
+
+  target.appendChild(wrapper);
+  scrollToLatest();
+
+  // TTS: read options aloud, numbered
+  if (gameState.ttsEnabled) {
+    const optionsText = opciones.map((o, i) => `Opción ${i + 1}: ${o.texto}`).join('. ');
+    speakText(`${playerName}, ¿qué hacen? ${optionsText}`);
+  }
+
+  // Advance player turn for next choice
+  advancePlayerTurn();
+
+  // Clear sidebar actions (no longer needed there)
+  const container = document.getElementById('adventure-actions');
+  container.innerHTML = '';
 
   // Enter key support
   setTimeout(() => {
@@ -873,8 +964,8 @@ async function submitCustomAction() {
   if (!input || !input.value.trim()) return;
   const action = input.value.trim();
 
-  addNarrative('action', 'Accion libre', action);
-  logStory('action', 'Accion libre', action);
+  addNarrative('action', 'Acción libre', action);
+  logStory('action', 'Acción libre', action);
   disableActions();
 
   const prompt = `${getGameStateForAI()}
@@ -890,8 +981,8 @@ Narra lo que sucede como resultado de esta accion. Si requiere alguna tirada de 
 }
 
 async function makeAIChoice(opcion) {
-  addNarrative('action', 'Accion', opcion.texto);
-  logStory('action', 'Accion', opcion.texto);
+  addNarrative('action', 'Acción', opcion.texto);
+  logStory('action', 'Acción', opcion.texto);
   disableActions();
 
   // Skill check
@@ -900,7 +991,7 @@ async function makeAIChoice(opcion) {
     const bestChar = gameState.characters.reduce((best, c) =>
       (c.stats[check.stat] || 10) > (best.stats[check.stat] || 10) ? c : best
     );
-    const d20 = roll(20);
+    const d20 = await interactiveRoll(20, `${bestChar.race.icon} ${bestChar.name} tira ${STAT_FULL_NAMES[check.stat] || check.stat}!`);
     const mod = getModForStat(bestChar, check.stat);
     const total = d20 + mod;
     const dc = check.dc || 12;
@@ -952,8 +1043,7 @@ Narra lo que sucede. Genera la siguiente escena.`;
 }
 
 function disableActions() {
-  const container = document.getElementById('adventure-actions');
-  container.querySelectorAll('.btn').forEach(btn => btn.disabled = true);
+  document.querySelectorAll('.inline-actions .btn').forEach(btn => btn.disabled = true);
   const input = document.getElementById('custom-action');
   if (input) input.disabled = true;
 }
@@ -971,37 +1061,163 @@ function usePotion() {
   const healAmount = potion.healing + roll(4);
   target.hp = Math.min(target.maxHp, target.hp + healAmount);
 
-  addNarrative('success', 'Pocion!', `${target.name} bebe una pocion y recupera ${healAmount} HP! (${target.hp}/${target.maxHp})`);
+  addNarrative('success', '¡Poción!', `${target.name} bebe una pocion y recupera ${healAmount} HP! (${target.hp}/${target.maxHp})`);
   updatePartyStatus();
+}
+
+function scrollToLatest() {
+  const block = gameState.currentRoomBlock;
+  if (block && block.lastElementChild) {
+    block.lastElementChild.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  } else {
+    const panel = document.querySelector('.narrative-panel');
+    if (panel) panel.scrollTop = 0;
+  }
+}
+
+function startNewRoomBlock(label) {
+  const log = document.getElementById('narrative-log');
+  const block = document.createElement('div');
+  block.className = 'room-block';
+  block.id = `room-block-${gameState.roomCount}`;
+  log.prepend(block);
+  gameState.currentRoomBlock = block;
+  addRoomNavItem(label);
+}
+
+function addRoomNavItem(label) {
+  const list = document.getElementById('room-nav-list');
+  if (!list) return;
+  const roomNum = gameState.roomCount;
+  const text = label || `Sala ${roomNum}`;
+
+  // Deactivate previous active item
+  list.querySelectorAll('.room-nav-item').forEach(el => el.classList.remove('active'));
+
+  const item = document.createElement('div');
+  item.className = 'room-nav-item active';
+  item.textContent = text;
+  item.dataset.room = roomNum;
+  item.onclick = () => scrollToRoom(roomNum);
+  list.appendChild(item);
+
+  // Scroll nav to bottom to show latest
+  list.scrollTop = list.scrollHeight;
+}
+
+function markRoomNavCombat() {
+  const list = document.getElementById('room-nav-list');
+  if (!list) return;
+  const active = list.querySelector('.room-nav-item.active');
+  if (active) active.classList.add('combat');
+}
+
+function scrollToRoom(roomNum) {
+  const block = document.getElementById(`room-block-${roomNum}`);
+  if (!block) return;
+  block.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  // Update active state in nav
+  const list = document.getElementById('room-nav-list');
+  if (list) {
+    list.querySelectorAll('.room-nav-item').forEach(el => {
+      el.classList.toggle('active', parseInt(el.dataset.room) === roomNum);
+    });
+  }
 }
 
 function addNarrative(type, title, text) {
   const log = document.getElementById('narrative-log');
+  const target = gameState.currentRoomBlock || log;
   const entry = document.createElement('div');
   entry.className = `narrative-entry ${type}`;
   entry.innerHTML = `<div class="speaker">${title}</div><div>${text}</div>`;
-  log.appendChild(entry);
-  log.scrollTop = log.scrollHeight;
+  target.appendChild(entry);
+  // Scroll narrative panel to top to show newest room
+  scrollToLatest();
+  // TTS for DM narration
+  if (type === 'dm' && gameState.ttsEnabled) {
+    speakText(text);
+  }
 }
 
 function updatePartyStatus() {
-  const container = document.getElementById('party-status');
-  container.innerHTML = `<h4 style="color: var(--gold); margin-bottom: 10px;">Grupo (${gameState.gold} 💰 | ${gameState.xp} XP | Sala ${gameState.roomCount})</h4>`;
+  // Render in nav panel (AI mode) or sidebar (human DM mode)
+  const navTarget = document.getElementById('party-status-nav');
+  const sidebarTarget = document.getElementById('party-status');
+
+  const html = buildPartyStatusHTML();
+
+  if (gameConfig.dmMode === 'ai' && navTarget) {
+    navTarget.innerHTML = html;
+    if (sidebarTarget) sidebarTarget.innerHTML = '';
+  } else if (sidebarTarget) {
+    sidebarTarget.innerHTML = html;
+    if (navTarget) navTarget.innerHTML = '';
+  }
+}
+
+function buildPartyStatusHTML() {
+  let html = `
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+      <span style="color: var(--gold); font-weight:bold; font-size:0.85em;">${gameState.gold} 💰 ${gameState.xp} XP</span>
+      <button class="btn btn-small tts-toggle ${gameState.ttsEnabled ? 'active' : ''}" onclick="toggleTTS()" title="Narrador por voz" style="padding:3px 8px; font-size:0.8em;">🔊</button>
+    </div>
+  `;
   gameState.characters.forEach(c => {
     const hpPercent = (c.hp / c.maxHp) * 100;
     const barClass = hpPercent <= 25 ? 'low' : hpPercent <= 50 ? 'medium' : '';
-    const member = document.createElement('div');
-    member.className = 'party-member';
-    member.innerHTML = `
-      <div class="member-icon">${c.race.icon}</div>
-      <div class="member-info">
-        <div class="member-name">${c.name} (${c.playerName})</div>
-        <div class="member-class">${c.race.name} ${c.class.name} | CA: ${c.ac}</div>
-        <div class="hp-bar"><div class="hp-bar-fill ${barClass}" style="width: ${hpPercent}%"></div></div>
-        <div class="hp-text">${c.hp}/${c.maxHp} HP${c.spellSlots > 0 ? ` | Hechizos: ${c.spellSlots}/${c.maxSpellSlots}` : ''}</div>
+    html += `
+      <div class="party-member compact">
+        <div class="member-icon">${c.race.icon}</div>
+        <div class="member-info">
+          <div class="member-name">${c.name}</div>
+          <div class="hp-bar"><div class="hp-bar-fill ${barClass}" style="width: ${hpPercent}%"></div></div>
+          <div class="hp-text">${c.hp}/${c.maxHp} HP${c.spellSlots > 0 ? ` | ${c.spellSlots}/${c.maxSpellSlots} ✨` : ''}</div>
+        </div>
       </div>
     `;
-    container.appendChild(member);
+  });
+  return html;
+}
+
+function interactiveRoll(sides, label) {
+  return new Promise(resolve => {
+    const target = gameState.currentRoomBlock || document.getElementById('narrative-log');
+    const wrapper = document.createElement('div');
+    wrapper.className = 'interactive-dice';
+    wrapper.innerHTML = `
+      <div class="dice-label">${label}</div>
+      <button class="dice-throw-btn">
+        <span class="dice-icon">🎲</span>
+        <span>Tirar d${sides}!</span>
+      </button>
+    `;
+    target.appendChild(wrapper);
+    const panel = document.querySelector('.narrative-panel');
+    if (panel) panel.scrollTop = 0;
+
+    const btn = wrapper.querySelector('.dice-throw-btn');
+    btn.onclick = () => {
+      btn.disabled = true;
+      const result = roll(sides);
+      const diceIcon = wrapper.querySelector('.dice-icon');
+      diceIcon.classList.add('dice-rolling');
+
+      setTimeout(() => {
+        let resultClass = '';
+        let extra = '';
+        if (sides === 20 && result === 20) { resultClass = 'critical'; extra = '<span class="critical-text"> CRITICO!</span>'; }
+        if (sides === 20 && result === 1) { resultClass = 'fumble'; extra = '<span style="color:var(--red)"> PIFIA!</span>'; }
+        wrapper.innerHTML = `
+          <div class="dice-label">${label}</div>
+          <div class="dice-result-display ${resultClass}">
+            <span class="dice-result-number">${result}</span>${extra}
+          </div>
+        `;
+        resolve(result);
+      }, 600);
+    };
   });
 }
 
@@ -1044,6 +1260,7 @@ function dmSendNarration() {
   const textarea = document.getElementById('dm-narration');
   if (!textarea || !textarea.value.trim()) return;
   gameState.roomCount++;
+  startNewRoomBlock(`Sala ${gameState.roomCount}`);
   const narration = textarea.value.trim();
   addNarrative('dm', `${gameState.dmName} (Sala ${gameState.roomCount})`, narration);
   logStory('scene', `Sala ${gameState.roomCount}`, narration);
@@ -1071,14 +1288,14 @@ function dmSendOptions() {
 
   // Switch to player view
   const container = document.getElementById('adventure-actions');
-  container.innerHTML = '<h4 style="color: var(--gold); margin-bottom: 8px;">Que hacen?</h4>';
+  container.innerHTML = '<h4 style="color: var(--gold); margin-bottom: 8px;">¿Qué hacen?</h4>';
 
   options.forEach(text => {
     const btn = document.createElement('button');
     btn.className = 'btn';
     btn.textContent = text;
     btn.onclick = () => {
-      addNarrative('action', 'Accion', text);
+      addNarrative('action', 'Acción', text);
       // Show DM panel again for response
       renderHumanDMActions();
     };
@@ -1089,7 +1306,7 @@ function dmSendOptions() {
   const customDiv = document.createElement('div');
   customDiv.style.cssText = 'display:flex; gap:8px; margin-top:10px;';
   customDiv.innerHTML = `
-    <input type="text" id="player-custom-action" placeholder="O escribe tu propia accion..." style="flex:1; padding:10px; border:2px solid var(--border); border-radius:8px; background:var(--bg-dark); color:var(--text); font-size:0.95em;">
+    <input type="text" id="player-custom-action" placeholder="O escribí tu propia acción..." style="flex:1; padding:10px; border:2px solid var(--border); border-radius:8px; background:var(--bg-dark); color:var(--text); font-size:0.95em;">
     <button class="btn btn-primary" onclick="dmPlayerCustomAction()">Hacer</button>
   `;
   container.appendChild(customDiv);
@@ -1104,7 +1321,7 @@ function dmSendOptions() {
 function dmPlayerCustomAction() {
   const input = document.getElementById('player-custom-action');
   if (!input || !input.value.trim()) return;
-  addNarrative('action', 'Accion libre', input.value.trim());
+  addNarrative('action', 'Acción libre', input.value.trim());
   renderHumanDMActions();
 }
 
@@ -1147,7 +1364,7 @@ function dmStartCombat() {
   }
   const enemies = [...gameState._dmSelectedEnemies];
   gameState._dmSelectedEnemies = [];
-  addNarrative('combat-msg', 'Combate!', 'El Dungeon Master inicia un combate!');
+  addNarrative('combat-msg', '¡Combate!', 'El Dungeon Master inicia un combate!');
   updatePartyStatus();
   setTimeout(() => startCombat(enemies), 500);
 }
@@ -1188,15 +1405,15 @@ function dmGiveLoot() {
 
   if (gold > 0) {
     gameState.gold += gold;
-    addNarrative('loot', 'Tesoro!', `Encuentran ${gold} monedas de oro! (Total: ${gameState.gold})`);
+    addNarrative('loot', '¡Tesoro!', `Encuentran ${gold} monedas de oro! (Total: ${gameState.gold})`);
   }
   if (potionHeal > 0) {
-    gameState.inventory.push({ name: 'Pocion de Curacion', type: 'potion', healing: potionHeal });
-    addNarrative('loot', 'Objeto!', `Encuentran: Pocion de Curacion (cura ${potionHeal} HP).`);
+    gameState.inventory.push({ name: 'Poción de Curación', type: 'potion', healing: potionHeal });
+    addNarrative('loot', '¡Objeto!', `Encuentran: Poción de Curación (cura ${potionHeal} HP).`);
   }
   if (itemName) {
     gameState.inventory.push({ name: itemName, type: 'artifact' });
-    addNarrative('loot', 'Objeto!', `Encuentran: ${itemName}!`);
+    addNarrative('loot', '¡Objeto!', `Encuentran: ${itemName}!`);
   }
 
   document.getElementById('dm-extra-panel').innerHTML = '';
@@ -1236,7 +1453,7 @@ function dmActivateTrap() {
   const target = gameState.characters[targetIdx];
   const dmg = roll(die) + roll(die);
   target.hp = Math.max(0, target.hp - dmg);
-  addNarrative('combat-msg', 'Trampa!', `${desc} ${target.name} recibe ${dmg} puntos de dano!`);
+  addNarrative('combat-msg', '¡Trampa!', `${desc} ${target.name} recibe ${dmg} puntos de dano!`);
   document.getElementById('dm-extra-panel').innerHTML = '';
   updatePartyStatus();
 }
@@ -1247,7 +1464,7 @@ function dmHealParty() {
   gameState.characters.forEach(c => {
     c.hp = Math.min(c.maxHp, c.hp + amount);
   });
-  addNarrative('success', 'Curacion!', `El grupo se cura. Todos recuperan ${amount} HP!`);
+  addNarrative('success', '¡Curación!', `El grupo se cura. Todos recuperan ${amount} HP!`);
   updatePartyStatus();
 }
 
@@ -1255,7 +1472,7 @@ function dmGiveXP() {
   const amount = parseInt(prompt('Cuantos XP gana el grupo?', '50')) || 0;
   if (amount <= 0) return;
   gameState.xp += amount;
-  addNarrative('success', 'Experiencia!', `El grupo gana ${amount} XP! (Total: ${gameState.xp} XP)`);
+  addNarrative('success', '¡Experiencia!', `El grupo gana ${amount} XP! (Total: ${gameState.xp} XP)`);
   updatePartyStatus();
 }
 
@@ -1309,16 +1526,24 @@ function startCombat(enemyIds) {
     round: 1,
   };
 
-  showScreen('screen-combat');
-  document.getElementById('combat-log').innerHTML = '';
+  // Ensure a room block exists for combat entries
+  if (!gameState.currentRoomBlock) startNewRoomBlock(`Sala ${gameState.roomCount}`);
+  markRoomNavCombat();
+
+  // Create combat-actions container inline in narrative
+  const combatActionsDiv = document.createElement('div');
+  combatActionsDiv.id = 'combat-actions';
+  combatActionsDiv.className = 'combat-actions inline-combat-actions';
+  const roomTarget = gameState.currentRoomBlock || document.getElementById('narrative-log');
+  roomTarget.appendChild(combatActionsDiv);
 
   addCombatLog('info', `⚔️ COMBATE - Ronda ${gameState.combat.round}`);
 
   // Generate combat image
   const enemyNames = enemies.map(e => e.name).join(', ');
   const combatDesc = `Epic battle scene: heroes fighting against ${enemyNames}`;
-  logStory('combat', 'Combate!', `Los heroes se enfrentan a: ${enemyNames}`);
-  const combatPlaceholderId = addImagePlaceholder('combat-log');
+  logStory('combat', '¡Combate!', `Los heroes se enfrentan a: ${enemyNames}`);
+  const combatPlaceholderId = addImagePlaceholder('narrative-log');
   generateSceneImage(combatDesc, 'action combat scene, dynamic poses, weapons clashing, magical effects').then(base64 => {
     resolveImagePlaceholder(combatPlaceholderId, base64);
     if (base64) {
@@ -1337,18 +1562,26 @@ function startCombat(enemyIds) {
 }
 
 function addCombatLog(type, text) {
-  const log = document.getElementById('combat-log');
+  const log = document.getElementById('narrative-log');
+  const target = gameState.currentRoomBlock || log;
   const entry = document.createElement('div');
   entry.className = `combat-log-entry ${type}`;
   entry.innerHTML = text;
-  log.appendChild(entry);
-  log.scrollTop = log.scrollHeight;
+  target.appendChild(entry);
+  scrollToLatest();
 }
 
 function updateTurnOrder() {
-  const container = document.getElementById('turn-order');
   const combat = gameState.combat;
-  container.innerHTML = '<h4>Orden de Turno</h4>';
+  const target = gameState.currentRoomBlock || document.getElementById('narrative-log');
+
+  // Remove previous turn order from narrative
+  const prev = target.querySelector('.turn-order-inline');
+  if (prev) prev.remove();
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'turn-order-inline';
+  wrapper.innerHTML = '<h4 style="color:var(--gold); margin-bottom:6px;">Orden de turno</h4>';
 
   combat.combatants.forEach((c, i) => {
     const isActive = i === combat.currentTurn;
@@ -1364,8 +1597,16 @@ function updateTurnOrder() {
       <span>${c.isEnemy ? c.icon : c.race.icon} ${c.name}</span>
       <span style="margin-left:auto">${c.hp}/${c.maxHp}</span>
     `;
-    container.appendChild(entry);
+    wrapper.appendChild(entry);
   });
+
+  target.appendChild(wrapper);
+
+  // Keep combat-actions at the end of the room block
+  const combatActions = document.getElementById('combat-actions');
+  if (combatActions) target.appendChild(combatActions);
+
+  scrollToLatest();
 }
 
 function processTurn() {
@@ -1400,6 +1641,21 @@ function processTurn() {
   }
 }
 
+function getSpellDamageInfo(spell, player) {
+  const mod = getModForStat(player.ref || player, player.class.primaryStat);
+  const sabMod = getModForStat(player.ref || player, 'SAB');
+  switch (spell) {
+    case 'Bola de Fuego': return `[3d6 = 3-18 fuego, area]`;
+    case 'Rayo de Escarcha': return `[2d8 = 2-16 frio]`;
+    case 'Palabra Sagrada': return `[2d8${modStr(mod)} = ${2 + mod}-${16 + mod} radiante]`;
+    case 'Marca del Cazador': return `[d6+d${player.class.weaponDie}${modStr(mod)} = ${2 + mod}-${6 + player.class.weaponDie + mod}]`;
+    case 'Curar Heridas': return `[d8${modStr(sabMod)} = ${1 + sabMod}-${8 + sabMod} curacion]`;
+    case 'Bendicion': return `[+1 CA grupo]`;
+    case 'Escudo Magico': return `[+3 CA propio]`;
+    default: return '';
+  }
+}
+
 function showPlayerCombatActions(player) {
   const container = document.getElementById('combat-actions');
   container.innerHTML = `<h4>Turno de ${player.name}</h4>`;
@@ -1414,7 +1670,8 @@ function showPlayerCombatActions(player) {
     player.class.spells.forEach(spell => {
       const spellBtn = document.createElement('button');
       spellBtn.className = 'btn btn-secondary';
-      spellBtn.textContent = `✨ ${spell}`;
+      const spellDmgInfo = getSpellDamageInfo(spell, player);
+      spellBtn.textContent = `✨ ${spell} ${spellDmgInfo}`;
       spellBtn.onclick = () => {
         if (spell === 'Curar Heridas') {
           showHealTargetSelect(player, spell);
@@ -1434,7 +1691,7 @@ function showPlayerCombatActions(player) {
   if (potions.length > 0) {
     const potionBtn = document.createElement('button');
     potionBtn.className = 'btn btn-secondary';
-    potionBtn.textContent = `🧪 Usar Pocion (${potions.length})`;
+    potionBtn.textContent = `🧪 Usar Poción (${potions.length})`;
     potionBtn.onclick = () => useCombatPotion(player);
     container.appendChild(potionBtn);
   }
@@ -1473,7 +1730,7 @@ function showHealTargetSelect(player, spell) {
 
   const targetDiv = document.createElement('div');
   targetDiv.className = 'target-select';
-  targetDiv.innerHTML = '<strong>A quien curar?</strong>';
+  targetDiv.innerHTML = '<strong>¿A quién curar?</strong>';
 
   livingPlayers.forEach(target => {
     const btn = document.createElement('button');
@@ -1486,9 +1743,9 @@ function showHealTargetSelect(player, spell) {
   container.appendChild(targetDiv);
 }
 
-function playerAttack(attacker, target) {
-  const d20 = roll(20);
+async function playerAttack(attacker, target) {
   const primaryStat = attacker.class.primaryStat;
+  const d20 = await interactiveRoll(20, `${attacker.race.icon} ${attacker.name} ataca a ${target.icon} ${target.name}!`);
   const atkMod = getModForStat(attacker.ref || attacker, primaryStat);
   const total = d20 + atkMod;
 
@@ -1525,7 +1782,7 @@ function playerAttack(attacker, target) {
   nextTurn();
 }
 
-function castOffensiveSpell(caster, target, spell) {
+async function castOffensiveSpell(caster, target, spell) {
   if (caster.ref) caster.ref.spellSlots--;
 
   const intMod = getModForStat(caster.ref || caster, caster.class.primaryStat);
@@ -1533,9 +1790,10 @@ function castOffensiveSpell(caster, target, spell) {
   let desc = '';
 
   if (spell === 'Bola de Fuego') {
+    await interactiveRoll(6, `🔥 ${caster.name} lanza Bola de Fuego! Tira dano!`);
     const dice = rollMultiple(3, 6);
     dmg = dice.reduce((a, b) => a + b, 0);
-    desc = `🔥 ${caster.name} lanza Bola de Fuego! (${dice.join('+')} = ${dmg} dano de fuego)`;
+    desc = `🔥 Bola de Fuego! (${dice.join('+')} = ${dmg} dano de fuego)`;
     const combat = gameState.combat;
     const livingEnemies = combat.combatants.filter(c => c.isEnemy && c.hp > 0);
     livingEnemies.forEach(enemy => {
@@ -1553,7 +1811,7 @@ function castOffensiveSpell(caster, target, spell) {
     });
     addCombatLog('critical', desc);
   } else if (spell === 'Rayo de Escarcha') {
-    const d20 = roll(20);
+    const d20 = await interactiveRoll(20, `${caster.race.icon} ${caster.name} lanza Rayo de Escarcha a ${target.icon} ${target.name}!`);
     const total = d20 + intMod;
     dmg = roll(8) + roll(8);
     desc = `❄️ ${caster.name} lanza Rayo de Escarcha a ${target.name}: 🎲 ${d20} ${modStr(intMod)} = ${total}`;
@@ -1567,12 +1825,14 @@ function castOffensiveSpell(caster, target, spell) {
       addCombatLog('miss', desc);
     }
   } else if (spell === 'Palabra Sagrada') {
+    await interactiveRoll(8, `✨ ${caster.name} pronuncia una Palabra Sagrada! Tira dano!`);
     dmg = roll(8) + roll(8) + intMod;
     target.hp = Math.max(0, target.hp - dmg);
     desc = `✨ ${caster.name} pronuncia una Palabra Sagrada contra ${target.name}! ${dmg} dano radiante!`;
     if (target.hp <= 0) desc += ` 💀 Derrotado!`;
     addCombatLog('hit', desc);
   } else if (spell === 'Marca del Cazador') {
+    await interactiveRoll(6, `🎯 ${caster.name} marca a ${target.icon} ${target.name}! Tira dano!`);
     dmg = roll(6) + roll(caster.class.weaponDie) + intMod;
     target.hp = Math.max(0, target.hp - dmg);
     desc = `🎯 ${caster.name} marca a ${target.name} y dispara! ${dmg} dano!`;
@@ -1695,9 +1955,11 @@ function nextTurn() {
 }
 
 function shakeCombatLog() {
-  const log = document.getElementById('combat-log');
-  log.classList.add('shake');
-  setTimeout(() => log.classList.remove('shake'), 400);
+  const panel = document.querySelector('.narrative-panel');
+  if (panel) {
+    panel.classList.add('shake');
+    setTimeout(() => panel.classList.remove('shake'), 400);
+  }
 }
 
 async function endCombat(victory) {
@@ -1718,8 +1980,7 @@ async function endCombat(victory) {
     });
 
     setTimeout(async () => {
-      showScreen('screen-adventure');
-      addNarrative('success', 'Victoria en combate!', 'Los enemigos han sido derrotados!');
+      addNarrative('success', '¡Victoria en combate!', 'Los enemigos han sido derrotados!');
       updatePartyStatus();
       gameState.combat = null;
 
@@ -1752,20 +2013,6 @@ Los heroes acaban de ganar un combate contra: ${defeatedEnemies}. Narra brevemen
 function showVictory() {
   logStory('victory', 'Victoria!', 'Los heroes han completado la aventura!');
 
-  // Generate a final epic victory image
-  const victoryDesc = `Triumphant heroes celebrating victory, epic fantasy scene, golden light, treasure and glory, ${IMAGE_SETTING_CONTEXT[gameConfig.setting] || 'fantasy landscape'}`;
-  generateSceneImage(victoryDesc, 'victorious celebration, heroic poses, dramatic golden lighting').then(base64 => {
-    if (base64) {
-      const entry = gameState.storyLog[gameState.storyLog.length - 1];
-      if (entry && entry.type === 'victory') entry.imageBase64 = base64;
-      // Update the end screen image if visible
-      const imgContainer = document.getElementById('end-scene-image');
-      if (imgContainer) {
-        imgContainer.innerHTML = `<img src="data:image/png;base64,${base64}" alt="Victoria" class="scene-image">`;
-      }
-    }
-  });
-
   const content = document.getElementById('end-content');
   content.className = 'end-content victory';
   content.innerHTML = `
@@ -1787,22 +2034,29 @@ function showVictory() {
     <button onclick="downloadAdventureHTML()" class="btn btn-primary btn-large" style="margin-top:15px;">📜 Descargar Cronica de Aventura</button>
   `;
   showScreen('screen-end');
+
+  // Generate image after screen is shown so the placeholder exists
+  const victoryDesc = `Triumphant heroes celebrating victory, epic fantasy scene, golden light, treasure and glory, ${IMAGE_SETTING_CONTEXT[gameConfig.setting] || 'fantasy landscape'}`;
+  generateSceneImage(victoryDesc, 'victorious celebration, heroic poses, dramatic golden lighting').then(base64 => {
+    const imgContainer = document.getElementById('end-scene-image');
+    if (base64) {
+      const entry = gameState.storyLog.find(e => e.type === 'victory');
+      if (entry) entry.imageBase64 = base64;
+      if (imgContainer) {
+        imgContainer.classList.remove('loading');
+        imgContainer.innerHTML = `<img src="data:image/png;base64,${base64}" alt="Victoria" class="scene-image">`;
+      }
+    } else {
+      if (imgContainer) imgContainer.remove();
+    }
+  }).catch(() => {
+    const imgContainer = document.getElementById('end-scene-image');
+    if (imgContainer) imgContainer.remove();
+  });
 }
 
 function showDefeat() {
   logStory('defeat', 'Derrota', 'Los heroes han caido...');
-
-  const defeatDesc = `Fallen heroes defeated in battle, dark dramatic scene, somber atmosphere, ${IMAGE_SETTING_CONTEXT[gameConfig.setting] || 'fantasy landscape'}`;
-  generateSceneImage(defeatDesc, 'fallen warriors, dramatic shadows, somber mood').then(base64 => {
-    if (base64) {
-      const entry = gameState.storyLog[gameState.storyLog.length - 1];
-      if (entry && entry.type === 'defeat') entry.imageBase64 = base64;
-      const imgContainer = document.getElementById('end-scene-image');
-      if (imgContainer) {
-        imgContainer.innerHTML = `<img src="data:image/png;base64,${base64}" alt="Derrota" class="scene-image">`;
-      }
-    }
-  });
 
   const content = document.getElementById('end-content');
   content.className = 'end-content defeat';
@@ -1817,6 +2071,25 @@ function showDefeat() {
     <button onclick="downloadAdventureHTML()" class="btn btn-primary btn-large" style="margin-top:15px;">📜 Descargar Cronica de Aventura</button>
   `;
   showScreen('screen-end');
+
+  // Generate image after screen is shown so the placeholder exists
+  const defeatDesc = `Fallen heroes defeated in battle, dark dramatic scene, somber atmosphere, ${IMAGE_SETTING_CONTEXT[gameConfig.setting] || 'fantasy landscape'}`;
+  generateSceneImage(defeatDesc, 'fallen warriors, dramatic shadows, somber mood').then(base64 => {
+    const imgContainer = document.getElementById('end-scene-image');
+    if (base64) {
+      const entry = gameState.storyLog.find(e => e.type === 'defeat');
+      if (entry) entry.imageBase64 = base64;
+      if (imgContainer) {
+        imgContainer.classList.remove('loading');
+        imgContainer.innerHTML = `<img src="data:image/png;base64,${base64}" alt="Derrota" class="scene-image">`;
+      }
+    } else {
+      if (imgContainer) imgContainer.remove();
+    }
+  }).catch(() => {
+    const imgContainer = document.getElementById('end-scene-image');
+    if (imgContainer) imgContainer.remove();
+  });
 }
 
 // --- ADVENTURE CHRONICLE (HTML EXPORT) ---
@@ -2082,6 +2355,32 @@ function rollFreeDice(sides) {
 
   const historyContainer = document.getElementById('dice-history');
   historyContainer.innerHTML = gameState.diceHistory.map(h => `<div class="dice-history-entry">${h}</div>`).join('');
+}
+
+// --- TEXT TO SPEECH ---
+
+function toggleTTS() {
+  gameState.ttsEnabled = !gameState.ttsEnabled;
+  const btn = document.querySelector('.tts-toggle');
+  if (btn) btn.classList.toggle('active', gameState.ttsEnabled);
+  if (!gameState.ttsEnabled) {
+    speechSynthesis.cancel();
+  }
+}
+
+function speakText(text) {
+  if (!('speechSynthesis' in window)) return;
+  speechSynthesis.cancel();
+  const clean = text.replace(/<[^>]*>/g, '').replace(/[*_~`]/g, '');
+  const utterance = new SpeechSynthesisUtterance(clean);
+  utterance.lang = 'es-ES';
+  utterance.rate = 0.95;
+  utterance.pitch = 0.9;
+  // Try to pick a Spanish voice
+  const voices = speechSynthesis.getVoices();
+  const esVoice = voices.find(v => v.lang.startsWith('es'));
+  if (esVoice) utterance.voice = esVoice;
+  speechSynthesis.speak(utterance);
 }
 
 // --- INIT ---

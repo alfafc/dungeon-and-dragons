@@ -23,7 +23,7 @@
 
     <!-- PANTALLA DE CONFIGURACION -->
     <div id="screen-config" class="screen">
-      <h2>Configurar Aventura</h2>
+      <h2>Configurar aventura</h2>
       <div class="config-form">
         <!-- Modo DM -->
         <div class="config-section">
@@ -44,7 +44,7 @@
 
         <!-- Duracion -->
         <div class="config-section">
-          <label class="config-label">Duracion:</label>
+          <label class="config-label">Duración:</label>
           <div class="config-options">
             <div class="option-card" onclick="setConfig('duration', 'short')" id="cfg-dur-short">
               <div class="icon">⚡</div>
@@ -110,7 +110,7 @@
 
         <!-- Ambientacion -->
         <div class="config-section">
-          <label class="config-label">Ambientacion:</label>
+          <label class="config-label">Ambientación:</label>
           <div class="config-options">
             <div class="option-card selected" onclick="setConfig('setting', 'dungeon')" id="cfg-set-dungeon">
               <div class="icon">🏰</div>
@@ -180,7 +180,8 @@
           <button onclick="setPlayerCount(4)" class="btn btn-small" id="pc-4">4</button>
         </div>
         <div id="player-names-container"></div>
-        <button onclick="startCharacterCreation()" class="btn btn-primary btn-large">Crear Personajes</button>
+        <div id="saved-characters-section" style="display:none;"></div>
+        <button onclick="startCharacterCreation()" class="btn btn-primary btn-large">Crear Personajes Nuevos</button>
         <button onclick="showScreen('screen-config')" class="btn btn-secondary">Volver</button>
       </div>
     </div>
@@ -202,9 +203,9 @@
           <div class="option-grid" id="class-options"></div>
         </div>
         <div class="form-row">
-          <label>Estadisticas (4d6, descarta el menor):</label>
+          <label>Estadísticas (4d6, descarta el menor):</label>
           <div id="stats-container" class="stats-grid"></div>
-          <button onclick="rollAllStats()" class="btn btn-secondary">Tirar Estadisticas</button>
+          <button onclick="rollAllStats()" class="btn btn-secondary">Tirar Estadísticas</button>
         </div>
         <div class="form-actions">
           <button onclick="confirmCharacter()" class="btn btn-primary btn-large" id="btn-confirm-char">Confirmar Personaje</button>
@@ -215,6 +216,11 @@
     <!-- PANTALLA DE AVENTURA -->
     <div id="screen-adventure" class="screen">
       <div class="adventure-layout">
+        <div class="room-nav-panel">
+          <div id="party-status-nav" class="party-status-nav"></div>
+          <h4>Salas</h4>
+          <div id="room-nav-list" class="room-nav-list"></div>
+        </div>
         <div class="narrative-panel">
           <div id="narrative-log" class="narrative-log"></div>
         </div>
@@ -225,19 +231,7 @@
       </div>
     </div>
 
-    <!-- PANTALLA DE COMBATE -->
-    <div id="screen-combat" class="screen">
-      <div class="combat-layout">
-        <div class="combat-log-panel">
-          <h3>Combate</h3>
-          <div id="combat-log" class="combat-log"></div>
-        </div>
-        <div class="combat-sidebar">
-          <div id="turn-order" class="turn-order"></div>
-          <div id="combat-actions" class="combat-actions"></div>
-        </div>
-      </div>
-    </div>
+    <!-- PANTALLA DE COMBATE (legacy, no se usa) -->
 
     <!-- PANTALLA DE DADOS LIBRE -->
     <div id="screen-dice-free" class="screen">
@@ -269,7 +263,7 @@
 
     <!-- PANTALLA DE REGLAS -->
     <div id="screen-rules" class="screen">
-      <h2>Reglas Basicas</h2>
+      <h2>Reglas Básicas</h2>
       <div class="rules-content">
         <div class="rule-section">
           <h3>Los Dados</h3>
@@ -286,7 +280,7 @@
           <p><strong>Pifia:</strong> Si sacas 1 natural, fallas automaticamente.</p>
         </div>
         <div class="rule-section">
-          <h3>Estadisticas</h3>
+          <h3>Estadísticas</h3>
           <p><strong>FUE</strong> (Fuerza) - Dano cuerpo a cuerpo, cargar cosas.</p>
           <p><strong>DES</strong> (Destreza) - Esquivar, sigilo, ataques a distancia.</p>
           <p><strong>CON</strong> (Constitucion) - Puntos de vida, resistencia.</p>
