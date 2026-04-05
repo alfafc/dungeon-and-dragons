@@ -98,14 +98,7 @@ function saveToLocalStorage() {
 }
 
 function loadFromLocalStorage() {
-  const savedConfig = localStorage.getItem('dnd_gameConfig');
-  if (savedConfig) {
-    const parsed = JSON.parse(savedConfig);
-    Object.assign(gameConfig, parsed);
-    // Restore UI selections
-    Object.entries(gameConfig).forEach(([key, value]) => setConfig(key, value));
-  }
-
+  // Restore player data FIRST (before config triggers saves)
   const savedCount = localStorage.getItem('dnd_playerCount');
   if (savedCount) {
     gameState.playerCount = parseInt(savedCount, 10);
@@ -124,6 +117,14 @@ function loadFromLocalStorage() {
   const savedDmName = localStorage.getItem('dnd_dmName');
   if (savedDmName) {
     gameState.dmName = savedDmName;
+  }
+
+  // Restore config and UI selections AFTER player data is loaded
+  const savedConfig = localStorage.getItem('dnd_gameConfig');
+  if (savedConfig) {
+    const parsed = JSON.parse(savedConfig);
+    Object.assign(gameConfig, parsed);
+    Object.entries(gameConfig).forEach(([key, value]) => setConfig(key, value));
   }
 }
 
@@ -550,6 +551,12 @@ function renderPlayerNames() {
       <input type="text" id="player-name-${i}" placeholder="Nombre del jugador" value="${gameState.playerNames[i] || ''}">
     `;
     container.appendChild(div);
+    // Auto-save name on change
+    const input = div.querySelector('input');
+    input.addEventListener('input', () => {
+      gameState.playerNames[i] = input.value.trim() || `Jugador ${i + 1}`;
+      saveToLocalStorage();
+    });
   }
 }
 
@@ -735,7 +742,9 @@ function getPartyDescription() {
 }
 
 function getGameStateForAI() {
-  return `[ESTADO DEL GRUPO] ${getPartyDescription()}. Oro: ${gameState.gold}. XP: ${gameState.xp}. Inventario: ${gameState.inventory.map(i => i.name).join(', ') || 'vacio'}. Sala actual: ${gameState.roomCount} de ~15.`;
+  const dur = DURATION_ROOMS[gameConfig.duration];
+  const maxRooms = dur ? dur.max : 15;
+  return `[ESTADO DEL GRUPO] ${getPartyDescription()}. Oro: ${gameState.gold}. XP: ${gameState.xp}. Inventario: ${gameState.inventory.map(i => i.name).join(', ') || 'vacío'}. Sala actual: ${gameState.roomCount} de ${maxRooms}. ${gameState.roomCount >= maxRooms - 2 ? 'IMPORTANTE: La aventura debe terminar pronto con un climax final.' : ''}`;
 }
 
 async function startAdventure() {
@@ -892,9 +901,7 @@ function renderAIActions(opciones) {
   const target = gameState.currentRoomBlock || document.getElementById('narrative-log');
 
   const playerName = getCurrentPlayerName();
-  const prompt = gameState.characters.length > 1
-    ? `${playerName}, ¿qué hacen?`
-    : `${playerName}, ¿qué hacés?`;
+  const prompt = `${playerName}, ¿qué harás?`;
 
   // Render interactive choices inline in narrative panel
   const wrapper = document.createElement('div');
@@ -906,7 +913,7 @@ function renderAIActions(opciones) {
     btn.className = 'btn';
     const icon = typeIcons[opcion.tipo] || '▶️';
     btn.textContent = `${i + 1}. ${icon} ${opcion.texto}`;
-    btn.onclick = () => makeAIChoice(opcion);
+    btn.onclick = () => { disableAllIn(wrapper); makeAIChoice(opcion); };
     wrapper.appendChild(btn);
   });
 
@@ -918,7 +925,7 @@ function renderAIActions(opciones) {
       const btn = document.createElement('button');
       btn.className = 'btn btn-secondary';
       btn.textContent = `🧪 Usar Poción de Curación (${potions.length} disponibles)`;
-      btn.onclick = () => usePotion();
+      btn.onclick = () => { disableAllIn(wrapper); usePotion(); };
       wrapper.appendChild(btn);
     }
   }
@@ -935,10 +942,10 @@ function renderAIActions(opciones) {
   target.appendChild(wrapper);
   scrollToLatest();
 
-  // TTS: read options aloud, numbered
+  // TTS: enqueue options after room narration finishes
   if (gameState.ttsEnabled) {
     const optionsText = opciones.map((o, i) => `Opción ${i + 1}: ${o.texto}`).join('. ');
-    speakText(`${playerName}, ¿qué hacen? ${optionsText}`);
+    speakText(`${playerName}, ¿qué harás? ${optionsText}`, true);
   }
 
   // Advance player turn for next choice
@@ -1063,6 +1070,13 @@ function usePotion() {
 
   addNarrative('success', '¡Poción!', `${target.name} bebe una pocion y recupera ${healAmount} HP! (${target.hp}/${target.maxHp})`);
   updatePartyStatus();
+}
+
+function disableAllIn(container) {
+  if (!container) return;
+  container.querySelectorAll('button, .btn').forEach(b => b.disabled = true);
+  const input = container.querySelector('input');
+  if (input) input.disabled = true;
 }
 
 function scrollToLatest() {
@@ -1194,8 +1208,7 @@ function interactiveRoll(sides, label) {
       </button>
     `;
     target.appendChild(wrapper);
-    const panel = document.querySelector('.narrative-panel');
-    if (panel) panel.scrollTop = 0;
+    wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
     const btn = wrapper.querySelector('.dice-throw-btn');
     btn.onclick = () => {
@@ -1288,7 +1301,7 @@ function dmSendOptions() {
 
   // Switch to player view
   const container = document.getElementById('adventure-actions');
-  container.innerHTML = '<h4 style="color: var(--gold); margin-bottom: 8px;">¿Qué hacen?</h4>';
+  container.innerHTML = '<h4 style="color: var(--gold); margin-bottom: 8px;">¿Qué harás?</h4>';
 
   options.forEach(text => {
     const btn = document.createElement('button');
@@ -1663,7 +1676,7 @@ function showPlayerCombatActions(player) {
   const attackBtn = document.createElement('button');
   attackBtn.className = 'btn';
   attackBtn.textContent = `⚔️ Atacar con ${player.class.weapon}`;
-  attackBtn.onclick = () => showTargetSelect(player, 'attack');
+  attackBtn.onclick = () => { disableAllIn(container); showTargetSelect(player, 'attack'); };
   container.appendChild(attackBtn);
 
   if (player.ref && player.ref.spellSlots > 0 && player.class.spells.length > 0) {
@@ -1673,6 +1686,7 @@ function showPlayerCombatActions(player) {
       const spellDmgInfo = getSpellDamageInfo(spell, player);
       spellBtn.textContent = `✨ ${spell} ${spellDmgInfo}`;
       spellBtn.onclick = () => {
+        disableAllIn(container);
         if (spell === 'Curar Heridas') {
           showHealTargetSelect(player, spell);
         } else if (spell === 'Bendicion') {
@@ -1692,7 +1706,7 @@ function showPlayerCombatActions(player) {
     const potionBtn = document.createElement('button');
     potionBtn.className = 'btn btn-secondary';
     potionBtn.textContent = `🧪 Usar Poción (${potions.length})`;
-    potionBtn.onclick = () => useCombatPotion(player);
+    potionBtn.onclick = () => { disableAllIn(container); useCombatPotion(player); };
     container.appendChild(potionBtn);
   }
 }
@@ -1711,6 +1725,7 @@ function showTargetSelect(player, actionType, spell) {
     btn.className = 'btn btn-danger btn-small';
     btn.textContent = `${enemy.icon} ${enemy.name} (${enemy.hp}/${enemy.maxHp} HP)`;
     btn.onclick = () => {
+      disableAllIn(targetDiv);
       if (actionType === 'attack') {
         playerAttack(player, enemy);
       } else if (actionType === 'spell') {
@@ -1736,7 +1751,7 @@ function showHealTargetSelect(player, spell) {
     const btn = document.createElement('button');
     btn.className = 'btn btn-secondary btn-small';
     btn.textContent = `${target.race.icon} ${target.name} (${target.hp}/${target.maxHp} HP)`;
-    btn.onclick = () => castHealSpell(player, target, spell);
+    btn.onclick = () => { disableAllIn(targetDiv); castHealSpell(player, target, spell); };
     targetDiv.appendChild(btn);
   });
 
@@ -2368,15 +2383,14 @@ function toggleTTS() {
   }
 }
 
-function speakText(text) {
+function speakText(text, enqueue) {
   if (!('speechSynthesis' in window)) return;
-  speechSynthesis.cancel();
+  if (!enqueue) speechSynthesis.cancel();
   const clean = text.replace(/<[^>]*>/g, '').replace(/[*_~`]/g, '');
   const utterance = new SpeechSynthesisUtterance(clean);
   utterance.lang = 'es-ES';
   utterance.rate = 0.95;
   utterance.pitch = 0.9;
-  // Try to pick a Spanish voice
   const voices = speechSynthesis.getVoices();
   const esVoice = voices.find(v => v.lang.startsWith('es'));
   if (esVoice) utterance.voice = esVoice;
@@ -2391,4 +2405,9 @@ renderPlayerNames();
 document.querySelectorAll('.player-count-selector .btn').forEach(b => b.classList.remove('active'));
 const pcBtn = document.getElementById(`pc-${gameState.playerCount}`);
 if (pcBtn) pcBtn.classList.add('active');
+// Restore DM name input
+const dmInput = document.getElementById('dm-human-name');
+if (dmInput && gameState.dmName && gameState.dmName !== 'Dungeon Master') {
+  dmInput.value = gameState.dmName;
+}
 initApiKeyInput();
