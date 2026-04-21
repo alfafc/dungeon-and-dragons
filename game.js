@@ -31,6 +31,32 @@ const STAT_FULL_NAMES = {
   INT: 'Inteligencia', SAB: 'Sabiduria', CAR: 'Carisma'
 };
 
+function resolveMonsterKey(input) {
+  if (!input) return null;
+  const key = input.toLowerCase().trim().replace(/\s+/g, '_');
+  // Exact match
+  if (MONSTERS[key]) return key;
+  // Normalize: remove accents, ñ→n
+  const norm = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ñ/g, 'n').replace(/Ñ/g, 'n').toLowerCase().replace(/\s+/g, '_');
+  const normKey = norm(key);
+  // Try normalized match
+  for (const id of Object.keys(MONSTERS)) {
+    if (norm(id) === normKey) return id;
+  }
+  // Partial match: input contains monster name or vice versa
+  for (const id of Object.keys(MONSTERS)) {
+    if (normKey.includes(norm(id)) || norm(id).includes(normKey)) return id;
+  }
+  // Match by display name
+  for (const [id, m] of Object.entries(MONSTERS)) {
+    if (norm(m.name) === normKey || normKey.includes(norm(m.name)) || norm(m.name).includes(normKey)) return id;
+  }
+  // Fallback: pick a random monster at appropriate difficulty
+  console.warn('Monster not found:', input, '- using fallback');
+  const keys = Object.keys(MONSTERS);
+  return keys[Math.floor(Math.random() * keys.length)];
+}
+
 const MONSTERS = {
   goblin: { name: 'Goblin', icon: '👺', hp: 12, ac: 13, attackMod: 4, damageDie: 6, damageBonus: 1, xp: 50, cr: 0.25 },
   esqueleto: { name: 'Esqueleto', icon: '💀', hp: 15, ac: 13, attackMod: 4, damageDie: 6, damageBonus: 2, xp: 50, cr: 0.25 },
@@ -185,6 +211,7 @@ let gameState = {
   ttsEnabled: true,
   ttsVoice: null,
   currentPlayerTurn: 0,
+  holdScroll: false,
 };
 
 // --- AI DUNGEON MASTER ---
@@ -801,16 +828,17 @@ function processAIRoom(response) {
   startNewRoomBlock(`Sala ${gameState.roomCount}`);
 
   // Narrativa
+  let imagePromise = Promise.resolve();
   if (response.narrativa) {
     addNarrative('dm', `Dungeon Master (Sala ${gameState.roomCount})`, response.narrativa);
     logStory('scene', `Sala ${gameState.roomCount}`, response.narrativa);
 
-    // Generate scene image asynchronously
+    // Generate scene image - capture promise to wait for it
     const placeholderId = addImagePlaceholder('narrative-log');
-    generateSceneImage(response.narrativa).then(base64 => {
+    imagePromise = generateSceneImage(response.narrativa).then(base64 => {
       resolveImagePlaceholder(placeholderId, base64);
       if (base64) updateLastStoryImage(base64);
-    });
+    }).catch(() => {});
   }
 
   // XP
@@ -850,13 +878,14 @@ function processAIRoom(response) {
 
   // Combate
   if (response.combate && response.combate.enemigos && response.combate.enemigos.length > 0) {
-    const validEnemies = response.combate.enemigos.filter(e => MONSTERS[e]);
-    if (validEnemies.length > 0) {
+    const resolvedEnemies = response.combate.enemigos.map(e => resolveMonsterKey(e)).filter(Boolean);
+    if (resolvedEnemies.length > 0) {
       if (response.combate.descripcion) {
         addNarrative('combat-msg', '¡Combate!', response.combate.descripcion);
       }
       updatePartyStatus();
-      setTimeout(() => startCombat(validEnemies), 1500);
+      releaseScrollAndGo();
+      setTimeout(() => startCombat(resolvedEnemies), 1500);
       return;
     }
   }
@@ -864,9 +893,26 @@ function processAIRoom(response) {
   // Opciones
   if (response.opciones && response.opciones.length > 0) {
     renderAIActions(response.opciones);
+  } else {
+    // Fallback: si no hay opciones ni combate, dar opciones genéricas para no trabar el juego
+    renderAIActions([
+      { texto: 'Explorar los alrededores', tipo: 'explorar' },
+      { texto: 'Avanzar con cautela', tipo: 'sigilo' },
+      { texto: 'Buscar tesoros o pistas', tipo: 'investigar' },
+    ]);
   }
 
   updatePartyStatus();
+
+  // Wait for image (max 10s) then release scroll. Never block the game.
+  Promise.race([imagePromise, new Promise(r => setTimeout(r, 10000))])
+    .then(() => releaseScrollAndGo())
+    .catch(() => releaseScrollAndGo());
+
+  // Safety net: always release scroll after 12s no matter what
+  setTimeout(() => {
+    if (gameState.holdScroll) releaseScrollAndGo();
+  }, 12000);
 }
 
 function processAILoot(loot) {
@@ -1101,7 +1147,21 @@ function disableAllIn(container) {
   if (input) input.disabled = true;
 }
 
+function releaseScrollAndGo() {
+  const remaining = (gameState.holdScrollUntil || 0) - Date.now();
+  if (remaining > 0) {
+    setTimeout(() => {
+      gameState.holdScroll = false;
+      scrollToLatest();
+    }, remaining);
+  } else {
+    gameState.holdScroll = false;
+    scrollToLatest();
+  }
+}
+
 function scrollToLatest() {
+  if (gameState.holdScroll) return;
   const block = gameState.currentRoomBlock;
   if (block && block.lastElementChild) {
     block.lastElementChild.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -1219,7 +1279,9 @@ function buildPartyStatusHTML() {
 
 function interactiveRoll(sides, label) {
   return new Promise(resolve => {
-    const target = gameState.currentRoomBlock || document.getElementById('narrative-log');
+    // During combat, dice goes in combat panel; otherwise in narrative
+    const combatLog = gameState.combat ? document.getElementById('combat-log-panel') : null;
+    const target = combatLog || gameState.currentRoomBlock || document.getElementById('narrative-log');
     const wrapper = document.createElement('div');
     wrapper.className = 'interactive-dice';
     wrapper.innerHTML = `
@@ -1233,11 +1295,19 @@ function interactiveRoll(sides, label) {
     wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
     const btn = wrapper.querySelector('.dice-throw-btn');
-    btn.onclick = () => {
-      btn.disabled = true;
+    let rolled = false;
+    btn.onclick = (e) => {
+      e.preventDefault();
+      if (rolled) return;
+      rolled = true;
+      // Don't use disabled (causes scroll jump), use visual + pointer block
+      btn.style.pointerEvents = 'none';
+      btn.style.opacity = '0.5';
       const result = roll(sides);
       const diceIcon = wrapper.querySelector('.dice-icon');
       diceIcon.classList.add('dice-rolling');
+      // Re-anchor scroll to wrapper immediately
+      requestAnimationFrame(() => wrapper.scrollIntoView({ block: 'center' }));
 
       setTimeout(() => {
         let resultClass = '';
@@ -1250,7 +1320,9 @@ function interactiveRoll(sides, label) {
             <span class="dice-result-number">${result}</span>${extra}
           </div>
         `;
-        wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        requestAnimationFrame(() => wrapper.scrollIntoView({ block: 'center' }));
+        gameState.holdScroll = true;
+        gameState.holdScrollUntil = Date.now() + 4000;
         resolve(result);
       }, 600);
     };
@@ -1562,25 +1634,27 @@ function startCombat(enemyIds) {
     round: 1,
   };
 
-  // Ensure a room block exists for combat entries
+  // Ensure a room block exists
   if (!gameState.currentRoomBlock) startNewRoomBlock(`Sala ${gameState.roomCount}`);
   markRoomNavCombat();
 
-  // Create combat-actions container inline in narrative
+  // Show dedicated combat panel
+  showCombatPanel();
+
+  // Create combat-actions container inside combat panel
   const combatActionsDiv = document.createElement('div');
   combatActionsDiv.id = 'combat-actions';
   combatActionsDiv.className = 'combat-actions inline-combat-actions';
-  const roomTarget = gameState.currentRoomBlock || document.getElementById('narrative-log');
-  roomTarget.appendChild(combatActionsDiv);
+  document.getElementById('combat-log-panel').appendChild(combatActionsDiv);
 
   addCombatLog('info', `⚔️ COMBATE - Ronda ${gameState.combat.round}`);
 
-  // Generate combat image
+  // Generate combat image in narrative panel (story record)
   const enemyNames = enemies.map(e => e.name).join(', ');
-  const combatDesc = `Epic battle scene: heroes fighting against ${enemyNames}`;
   logStory('combat', '¡Combate!', `Los heroes se enfrentan a: ${enemyNames}`);
+  addNarrative('combat-msg', '¡Combate!', `Los héroes se enfrentan a: ${enemyNames}`);
   const combatPlaceholderId = addImagePlaceholder('narrative-log');
-  generateSceneImage(combatDesc, 'action combat scene, dynamic poses, weapons clashing, magical effects').then(base64 => {
+  generateSceneImage(`Epic battle scene: heroes fighting against ${enemyNames}`, 'action combat scene, dynamic poses, weapons clashing, magical effects').then(base64 => {
     resolveImagePlaceholder(combatPlaceholderId, base64);
     if (base64) {
       const combatEntry = gameState.storyLog.find(e => e.type === 'combat' && !e.imageBase64);
@@ -1597,9 +1671,32 @@ function startCombat(enemyIds) {
   processTurn();
 }
 
+function showCombatPanel() {
+  const panel = document.getElementById('combat-panel');
+  const logPanel = document.getElementById('combat-log-panel');
+  if (panel) {
+    panel.style.display = '';
+    logPanel.innerHTML = '';
+  }
+  const layout = document.querySelector('.adventure-layout');
+  if (layout) layout.classList.add('combat-active');
+}
+
+function hideCombatPanel() {
+  const panel = document.getElementById('combat-panel');
+  if (panel) panel.style.display = 'none';
+  const layout = document.querySelector('.adventure-layout');
+  if (layout) layout.classList.remove('combat-active');
+}
+
+function scrollCombatToBottom() {
+  const log = document.getElementById('combat-log-panel');
+  if (log) log.scrollTop = log.scrollHeight;
+}
+
 function addCombatLog(type, text, combatant) {
-  const log = document.getElementById('narrative-log');
-  const target = gameState.currentRoomBlock || log;
+  const log = document.getElementById('combat-log-panel');
+  if (!log) return;
   const entry = document.createElement('div');
   entry.className = `combat-log-entry ${type}`;
   if (combatant) {
@@ -1610,15 +1707,16 @@ function addCombatLog(type, text, combatant) {
     }
   }
   entry.innerHTML = text;
-  target.appendChild(entry);
-  scrollToLatest();
+  log.appendChild(entry);
+  scrollCombatToBottom();
 }
 
 function updateTurnOrder() {
   const combat = gameState.combat;
-  const target = gameState.currentRoomBlock || document.getElementById('narrative-log');
+  const target = document.getElementById('combat-log-panel');
+  if (!target) return;
 
-  // Remove previous turn order from narrative
+  // Remove previous turn order
   const prev = target.querySelector('.turn-order-inline');
   if (prev) prev.remove();
 
@@ -1650,11 +1748,11 @@ function updateTurnOrder() {
 
   target.appendChild(wrapper);
 
-  // Keep combat-actions at the end of the room block
+  // Keep combat-actions at the end
   const combatActions = document.getElementById('combat-actions');
   if (combatActions) target.appendChild(combatActions);
 
-  scrollToLatest();
+  scrollCombatToBottom();
 }
 
 function processTurn() {
@@ -1834,6 +1932,7 @@ async function playerAttack(attacker, target) {
   }
 
   updateTurnOrder();
+  releaseScrollAndGo();
   nextTurn();
 }
 
@@ -1896,6 +1995,7 @@ async function castOffensiveSpell(caster, target, spell) {
   }
 
   updateTurnOrder();
+  releaseScrollAndGo();
   nextTurn();
 }
 
@@ -2010,7 +2110,7 @@ function nextTurn() {
 }
 
 function shakeCombatLog() {
-  const panel = document.querySelector('.narrative-panel');
+  const panel = document.getElementById('combat-panel');
   if (panel) {
     panel.classList.add('shake');
     setTimeout(() => panel.classList.remove('shake'), 400);
@@ -2035,6 +2135,7 @@ async function endCombat(victory) {
     });
 
     setTimeout(async () => {
+      hideCombatPanel();
       addNarrative('success', '¡Victoria en combate!', 'Los enemigos han sido derrotados!');
       updatePartyStatus();
       gameState.combat = null;
@@ -2057,6 +2158,7 @@ Los heroes acaban de ganar un combate contra: ${defeatedEnemies}. Narra brevemen
     addCombatLog('info', '💀 El grupo ha sido derrotado...');
     logStory('combat-end', 'Derrota en combate', 'Los heroes han caido ante sus enemigos...');
     setTimeout(() => {
+      hideCombatPanel();
       showDefeat();
       gameState.combat = null;
     }, 2000);
@@ -2066,6 +2168,7 @@ Los heroes acaban de ganar un combate contra: ${defeatedEnemies}. Narra brevemen
 // --- VICTORY / DEFEAT ---
 
 function showVictory() {
+  gameState.holdScroll = false;
   logStory('victory', 'Victoria!', 'Los heroes han completado la aventura!');
 
   const content = document.getElementById('end-content');
@@ -2111,6 +2214,7 @@ function showVictory() {
 }
 
 function showDefeat() {
+  gameState.holdScroll = false;
   logStory('defeat', 'Derrota', 'Los heroes han caido...');
 
   const content = document.getElementById('end-content');

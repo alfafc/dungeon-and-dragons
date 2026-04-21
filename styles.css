@@ -484,6 +484,41 @@ body {
   display: none;
 }
 
+/* COMBAT PANEL (separate from narrative) */
+.combat-panel {
+  background: var(--panel-bg);
+  border: 2px solid var(--red);
+  border-radius: 12px;
+  padding: 15px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.combat-panel h3 {
+  color: var(--red-light);
+  text-align: center;
+  margin-bottom: 10px;
+  font-size: 1.1em;
+  flex-shrink: 0;
+}
+
+.combat-log-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.adventure-layout.combat-active {
+  grid-template-columns: 180px 1fr 1fr;
+}
+
+.adventure-layout.no-sidebar.combat-active {
+  grid-template-columns: 180px 1fr 1fr;
+}
+
 /* ROOM NAVIGATION PANEL */
 .room-nav-panel {
   background: var(--panel-bg);
@@ -1038,6 +1073,10 @@ body {
 
   .room-nav-panel {
     display: none;
+  }
+
+  .adventure-layout.combat-active {
+    grid-template-columns: 1fr;
   }
 
   .combat-layout {
